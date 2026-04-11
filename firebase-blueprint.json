@@ -1,0 +1,74 @@
+{
+  "entities": {
+    "Project": {
+      "title": "Project",
+      "description": "A portfolio project showcasing interior design work.",
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string",
+          "description": "The title of the project."
+        },
+        "category": {
+          "type": "string",
+          "description": "The category of the project (e.g., Residential, Commercial)."
+        },
+        "description": {
+          "type": "string",
+          "description": "A brief description of the project."
+        },
+        "image": {
+          "type": "string",
+          "format": "uri",
+          "description": "The URL of the main project image (or the 'after' image)."
+        },
+        "hasBeforeAfter": {
+          "type": "boolean",
+          "description": "Whether the project has a before/after comparison."
+        },
+        "beforeImg": {
+          "type": "string",
+          "format": "uri",
+          "description": "The URL of the 'before' image, if applicable."
+        },
+        "createdAt": {
+          "type": "timestamp",
+          "description": "When the project was added."
+        },
+        "authorUID": {
+          "type": "string",
+          "description": "The UID of the admin who added the project."
+        }
+      },
+      "required": ["title", "category", "description", "image", "hasBeforeAfter", "createdAt", "authorUID"]
+    },
+    "User": {
+      "title": "User",
+      "description": "A user of the application (admins).",
+      "type": "object",
+      "properties": {
+        "role": {
+          "type": "string",
+          "enum": ["admin"],
+          "description": "The role of the user."
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "description": "The email address of the user."
+        }
+      },
+      "required": ["role", "email"]
+    }
+  },
+  "firestore": {
+    "/projects/{projectId}": {
+      "schema": { "$ref": "#/entities/Project" },
+      "description": "Stores all portfolio projects."
+    },
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "Stores user roles and profiles."
+    }
+  }
+}
