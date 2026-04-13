@@ -1,7 +1,28 @@
-import { ArrowRight, CheckCircle2 } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { ArrowRight, CheckCircle2, Loader2 } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { getPageContent } from '@/services/contentService';
 
 export default function Home() {
+  const [content, setContent] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchContent = async () => {
+      const data = await getPageContent('home');
+      if (data) setContent(data);
+      setLoading(false);
+    };
+    fetchContent();
+  }, []);
+
+  const heroTitle = content?.heroTitle || "Designing Elegant Interiors for Modern Living";
+  const heroSubtitle = content?.heroSubtitle || "Custom interiors with premium finishes and thoughtful execution.";
+
+  const introTitle = content?.introTitle || "Transforming spaces into timeless interiors with quality craftsmanship and thoughtful design.";
+  const introDescription = content?.introDescription || "At Madhav Interiors, we believe that your space should be a reflection of your personality and lifestyle. In business since 1984, we have decades of experience in creating bespoke residential and commercial interiors, bringing a perfect balance of aesthetics and functionality to every project. From conceptualization to final execution, our team ensures a seamless and premium experience.";
+  const introImage = content?.introImage || "https://images.unsplash.com/photo-1616486338812-3dadae4b4ace?q=80&w=2832&auto=format&fit=crop";
+
   return (
     <div className="flex flex-col">
       {/* Hero Section */}
@@ -17,15 +38,23 @@ export default function Home() {
         </div>
         
         <div className="container mx-auto px-6 md:px-12 relative z-10 text-center mt-16">
-          <span className="text-brand-ivory/80 uppercase tracking-[0.3em] text-sm font-medium mb-6 block">
-            Madhav Interiors
-          </span>
+          <div className="inline-flex items-center space-x-4 mb-6">
+            <div className="h-px w-8 bg-brand-ivory/40"></div>
+            <span className="text-brand-ivory/80 uppercase tracking-[0.3em] text-sm font-medium">
+              Madhav Interiors
+            </span>
+            <div className="h-px w-8 bg-brand-ivory/40"></div>
+          </div>
           <h1 className="text-4xl md:text-6xl lg:text-7xl font-serif text-white mb-6 max-w-4xl mx-auto leading-tight">
-            Designing Elegant Interiors for Modern Living
+            {heroTitle}
           </h1>
-          <p className="text-lg md:text-xl text-brand-ivory/90 mb-10 max-w-2xl mx-auto font-light">
-            Custom interiors for homes and workspaces with premium finishes and thoughtful execution.
-          </p>
+          <div className="flex items-center justify-center space-x-2 mb-10">
+            <span className="text-brand-wood font-serif italic text-lg">Since 1984</span>
+            <span className="text-brand-ivory/40">•</span>
+            <p className="text-lg md:text-xl text-brand-ivory/90 font-light">
+              {heroSubtitle}
+            </p>
+          </div>
           <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
             <Link
               to="/portfolio"
@@ -48,13 +77,13 @@ export default function Home() {
         <div className="container mx-auto px-6 md:px-12 text-center max-w-4xl">
           <span className="text-brand-wood uppercase tracking-widest text-xs font-semibold mb-4 block">Business Since 1984</span>
           <h2 className="text-3xl md:text-4xl font-serif text-brand-charcoal mb-8">
-            Transforming spaces into timeless interiors with quality craftsmanship and thoughtful design.
+            {introTitle}
           </h2>
           <p className="text-brand-charcoal/70 text-lg leading-relaxed">
-            At Madhav Interiors, we believe that your space should be a reflection of your personality and lifestyle. In business since 1984, we have decades of experience in creating bespoke residential and commercial interiors, bringing a perfect balance of aesthetics and functionality to every project. From conceptualization to final execution, our team ensures a seamless and premium experience.
+            {introDescription}
           </p>
           <img 
-            src="https://images.unsplash.com/photo-1616486338812-3dadae4b4ace?q=80&w=2832&auto=format&fit=crop" 
+            src={introImage} 
             alt="Interior Details" 
             className="w-full h-64 md:h-96 object-cover mt-16"
             referrerPolicy="no-referrer"
@@ -144,6 +173,47 @@ export default function Home() {
                 <p className="text-white font-serif text-xl italic">"Excellence is in the details."</p>
               </div>
             </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Testimonials */}
+      <section className="py-24 bg-white">
+        <div className="container mx-auto px-6 md:px-12">
+          <div className="text-center mb-16">
+            <span className="text-brand-wood uppercase tracking-widest text-xs font-semibold mb-4 block">Testimonials</span>
+            <h2 className="text-4xl font-serif text-brand-charcoal">What Our Clients Say</h2>
+          </div>
+          
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-12">
+            {[
+              {
+                quote: "Madhav Interiors transformed our apartment into a dream home. Their attention to detail and choice of materials is exceptional.",
+                author: "Rajesh Sharma",
+                location: "Pune"
+              },
+              {
+                quote: "Professional, creative, and timely. They understood our vision perfectly and executed it beyond our expectations.",
+                author: "Priya Mehta",
+                location: "Mumbai"
+              },
+              {
+                quote: "The best interior design team we've worked with. Their process is transparent and the results are stunning.",
+                author: "Amit Patel",
+                location: "Pune"
+              }
+            ].map((t, idx) => (
+              <div key={idx} className="bg-brand-ivory p-8 rounded-2xl relative">
+                <div className="text-brand-wood text-4xl font-serif absolute top-4 left-6 opacity-20">"</div>
+                <p className="text-brand-charcoal/80 italic mb-6 relative z-10 leading-relaxed">
+                  {t.quote}
+                </p>
+                <div>
+                  <h4 className="font-medium text-brand-charcoal">{t.author}</h4>
+                  <p className="text-brand-charcoal/50 text-sm">{t.location}</p>
+                </div>
+              </div>
+            ))}
           </div>
         </div>
       </section>

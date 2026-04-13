@@ -1,9 +1,11 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { auth, db, storage, googleProvider } from '@/firebase';
 import { signInWithPopup, signOut, onAuthStateChanged, User } from 'firebase/auth';
-import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, serverTimestamp, query, orderBy } from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
-import { Trash2, Edit2, Plus, LogOut, Image as ImageIcon, Loader2 } from 'lucide-react';
+import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, serverTimestamp, query, orderBy, getDoc, setDoc } from 'firebase/firestore';
+import { ref, uploadBytesResumable, getDownloadURL, deleteObject } from 'firebase/storage';
+import { Trash2, Edit2, Plus, LogOut, Image as ImageIcon, Loader2, Layout as LayoutIcon, Briefcase, Info, MessageSquare, Settings } from 'lucide-react';
+import imageCompression from 'browser-image-compression';
+import { cn } from '@/lib/utils';
 
 interface Project {
   id: string;
@@ -24,19 +26,292 @@ export default function Admin() {
   const [isEditing, setIsEditing] = useState(false);
   const [currentProject, setCurrentProject] = useState<Partial<Project>>({});
   const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
   const [error, setError] = useState('');
+  const [activeTab, setActiveTab] = useState('portfolio');
+  const [pageData, setPageData] = useState<any>(null);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
       if (currentUser) {
-        fetchProjects();
+        if (activeTab === 'portfolio') {
+          fetchProjects();
+        } else {
+          fetchPageContent(activeTab);
+        }
       } else {
         setLoading(false);
       }
     });
     return () => unsubscribe();
-  }, []);
+  }, [activeTab]);
+
+  const fetchPageContent = async (pageId: string) => {
+    setLoading(true);
+    setError('');
+    try {
+      const docRef = doc(db, 'content', pageId);
+      const docSnap = await getDoc(docRef);
+      if (docSnap.exists()) {
+        setPageData(docSnap.data().data);
+      } else {
+        setPageData({});
+      }
+    } catch (err: any) {
+      console.error("Error fetching page content:", err);
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const savePageContent = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user) return;
+    setLoading(true);
+    setError('');
+    try {
+      const docRef = doc(db, 'content', activeTab);
+      await setDoc(docRef, {
+        data: pageData,
+        updatedAt: serverTimestamp()
+      });
+      alert("Page content saved successfully!");
+    } catch (err: any) {
+      console.error("Error saving page content:", err);
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const renderPageEditor = () => {
+    if (!pageData) return <div className="flex justify-center py-20"><Loader2 className="animate-spin text-brand-wood" size={40} /></div>;
+
+    return (
+      <div className="bg-white p-8 rounded-2xl shadow-sm mb-12">
+        <h2 className="text-2xl font-serif text-brand-charcoal mb-6 uppercase tracking-wider">
+          Edit {activeTab} Page
+        </h2>
+        <form onSubmit={savePageContent} className="space-y-6">
+          {activeTab === 'home' && (
+            <div className="space-y-8">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                  <label className="block text-sm font-medium text-brand-charcoal mb-2">Hero Title</label>
+                  <input
+                    type="text"
+                    value={pageData.heroTitle || ''}
+                    onChange={e => setPageData({...pageData, heroTitle: e.target.value})}
+                    className="w-full border border-brand-charcoal/20 p-3 rounded focus:outline-none focus:border-brand-wood"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-brand-charcoal mb-2">Hero Subtitle</label>
+                  <textarea
+                    rows={3}
+                    value={pageData.heroSubtitle || ''}
+                    onChange={e => setPageData({...pageData, heroSubtitle: e.target.value})}
+                    className="w-full border border-brand-charcoal/20 p-3 rounded focus:outline-none focus:border-brand-wood resize-none"
+                  ></textarea>
+                </div>
+              </div>
+
+              <div className="pt-6 border-t border-brand-charcoal/10">
+                <h4 className="font-medium text-brand-charcoal mb-4">Brand Introduction</h4>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div>
+                    <label className="block text-sm font-medium text-brand-charcoal mb-2">Intro Title</label>
+                    <input
+                      type="text"
+                      value={pageData.introTitle || ''}
+                      onChange={e => setPageData({...pageData, introTitle: e.target.value})}
+                      className="w-full border border-brand-charcoal/20 p-3 rounded mb-4"
+                    />
+                    <label className="block text-sm font-medium text-brand-charcoal mb-2">Intro Description</label>
+                    <textarea
+                      rows={5}
+                      value={pageData.introDescription || ''}
+                      onChange={e => setPageData({...pageData, introDescription: e.target.value})}
+                      className="w-full border border-brand-charcoal/20 p-3 rounded resize-none"
+                    ></textarea>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-brand-charcoal mb-2">Intro Image</label>
+                    {pageData.introImage && <img src={pageData.introImage} className="w-full h-40 object-cover mb-4 rounded" />}
+                    <input
+                      type="file"
+                      onChange={e => handleImageUpload(e, 'introImage', true)}
+                      className="w-full text-sm text-brand-charcoal/60"
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+          
+          {activeTab === 'about' && (
+            <div className="space-y-8">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                  <label className="block text-sm font-medium text-brand-charcoal mb-2">About Title</label>
+                  <input
+                    type="text"
+                    value={pageData.title || ''}
+                    onChange={e => setPageData({...pageData, title: e.target.value})}
+                    className="w-full border border-brand-charcoal/20 p-3 rounded focus:outline-none focus:border-brand-wood"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-brand-charcoal mb-2">About Description</label>
+                  <textarea
+                    rows={4}
+                    value={pageData.description || ''}
+                    onChange={e => setPageData({...pageData, description: e.target.value})}
+                    className="w-full border border-brand-charcoal/20 p-3 rounded focus:outline-none focus:border-brand-wood resize-none"
+                  ></textarea>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-6 border-t border-brand-charcoal/10">
+                <div>
+                  <h4 className="font-medium text-brand-charcoal mb-4">Philosophy Section</h4>
+                  <label className="block text-sm font-medium text-brand-charcoal mb-2">Title</label>
+                  <input
+                    type="text"
+                    value={pageData.philosophyTitle || ''}
+                    onChange={e => setPageData({...pageData, philosophyTitle: e.target.value})}
+                    className="w-full border border-brand-charcoal/20 p-3 rounded mb-4"
+                  />
+                  <label className="block text-sm font-medium text-brand-charcoal mb-2">Content</label>
+                  <textarea
+                    rows={4}
+                    value={pageData.philosophyContent || ''}
+                    onChange={e => setPageData({...pageData, philosophyContent: e.target.value})}
+                    className="w-full border border-brand-charcoal/20 p-3 rounded resize-none"
+                  ></textarea>
+                </div>
+                <div>
+                  <h4 className="font-medium text-brand-charcoal mb-4">Quality Commitment</h4>
+                  <label className="block text-sm font-medium text-brand-charcoal mb-2">Title</label>
+                  <input
+                    type="text"
+                    value={pageData.qualityTitle || ''}
+                    onChange={e => setPageData({...pageData, qualityTitle: e.target.value})}
+                    className="w-full border border-brand-charcoal/20 p-3 rounded mb-4"
+                  />
+                  <label className="block text-sm font-medium text-brand-charcoal mb-2">Content</label>
+                  <textarea
+                    rows={4}
+                    value={pageData.qualityContent || ''}
+                    onChange={e => setPageData({...pageData, qualityContent: e.target.value})}
+                    className="w-full border border-brand-charcoal/20 p-3 rounded resize-none"
+                  ></textarea>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-6 border-t border-brand-charcoal/10">
+                <div>
+                  <h4 className="font-medium text-brand-charcoal mb-4">About Image 1</h4>
+                  {pageData.image1 && <img src={pageData.image1} className="w-full h-40 object-cover mb-4 rounded" />}
+                  <input
+                    type="file"
+                    onChange={e => handleImageUpload(e, 'image1', true)}
+                    className="w-full text-sm text-brand-charcoal/60"
+                  />
+                </div>
+                <div>
+                  <h4 className="font-medium text-brand-charcoal mb-4">About Image 2</h4>
+                  {pageData.image2 && <img src={pageData.image2} className="w-full h-40 object-cover mb-4 rounded" />}
+                  <input
+                    type="file"
+                    onChange={e => handleImageUpload(e, 'image2', true)}
+                    className="w-full text-sm text-brand-charcoal/60"
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'contact' && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div>
+                <label className="block text-sm font-medium text-brand-charcoal mb-2">Phone 1 (Tulsiram)</label>
+                <input
+                  type="text"
+                  value={pageData.phone1 || ''}
+                  onChange={e => setPageData({...pageData, phone1: e.target.value})}
+                  className="w-full border border-brand-charcoal/20 p-3 rounded focus:outline-none focus:border-brand-wood"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-brand-charcoal mb-2">Phone 2 (Arjun)</label>
+                <input
+                  type="text"
+                  value={pageData.phone2 || ''}
+                  onChange={e => setPageData({...pageData, phone2: e.target.value})}
+                  className="w-full border border-brand-charcoal/20 p-3 rounded focus:outline-none focus:border-brand-wood"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-brand-charcoal mb-2">Email</label>
+                <input
+                  type="email"
+                  value={pageData.email || ''}
+                  onChange={e => setPageData({...pageData, email: e.target.value})}
+                  className="w-full border border-brand-charcoal/20 p-3 rounded focus:outline-none focus:border-brand-wood"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-brand-charcoal mb-2">Address</label>
+                <input
+                  type="text"
+                  value={pageData.address || ''}
+                  onChange={e => setPageData({...pageData, address: e.target.value})}
+                  className="w-full border border-brand-charcoal/20 p-3 rounded focus:outline-none focus:border-brand-wood"
+                />
+              </div>
+            </div>
+          )}
+
+          {(activeTab === 'services' || activeTab === 'process') && (
+            <>
+              <div>
+                <label className="block text-sm font-medium text-brand-charcoal mb-2">Page Title</label>
+                <input
+                  type="text"
+                  value={pageData.title || ''}
+                  onChange={e => setPageData({...pageData, title: e.target.value})}
+                  className="w-full border border-brand-charcoal/20 p-3 rounded focus:outline-none focus:border-brand-wood"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-brand-charcoal mb-2">Page Description</label>
+                <textarea
+                  rows={4}
+                  value={pageData.description || ''}
+                  onChange={e => setPageData({...pageData, description: e.target.value})}
+                  className="w-full border border-brand-charcoal/20 p-3 rounded focus:outline-none focus:border-brand-wood resize-none"
+                ></textarea>
+              </div>
+            </>
+          )}
+
+          <div className="flex justify-end pt-4">
+            <button
+              type="submit"
+              disabled={loading}
+              className="bg-brand-wood text-white px-10 py-4 rounded hover:bg-brand-charcoal transition-colors flex items-center uppercase tracking-widest text-sm font-medium"
+            >
+              {loading ? <Loader2 className="animate-spin mr-2" size={20} /> : null}
+              Save Changes
+            </button>
+          </div>
+        </form>
+      </div>
+    );
+  };
 
   const fetchProjects = async () => {
     try {
@@ -68,23 +343,51 @@ export default function Admin() {
     setProjects([]);
   };
 
-  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>, field: 'image' | 'beforeImg') => {
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>, field: string, isPageContent: boolean = false) => {
     if (!e.target.files || !e.target.files[0] || !user) return;
     
     const file = e.target.files[0];
     setUploading(true);
+    setUploadProgress(0);
     setError('');
     
     try {
-      const storageRef = ref(storage, `portfolio/${Date.now()}_${file.name}`);
-      await uploadBytes(storageRef, file);
-      const url = await getDownloadURL(storageRef);
+      // Image compression options
+      const options = {
+        maxSizeMB: 1,
+        maxWidthOrHeight: 1920,
+        useWebWorker: true
+      };
       
-      setCurrentProject(prev => ({ ...prev, [field]: url }));
+      const compressedFile = await imageCompression(file, options);
+      
+      const storageRef = ref(storage, `${isPageContent ? 'content' : 'portfolio'}/${Date.now()}_${file.name}`);
+      const uploadTask = uploadBytesResumable(storageRef, compressedFile);
+
+      uploadTask.on('state_changed', 
+        (snapshot) => {
+          const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
+          setUploadProgress(progress);
+        }, 
+        (err) => {
+          console.error("Upload error:", err);
+          setError("Failed to upload image.");
+          setUploading(false);
+        }, 
+        async () => {
+          const url = await getDownloadURL(uploadTask.snapshot.ref);
+          if (isPageContent) {
+            setPageData(prev => ({ ...prev, [field]: url }));
+          } else {
+            setCurrentProject(prev => ({ ...prev, [field]: url }));
+          }
+          setUploading(false);
+          setUploadProgress(0);
+        }
+      );
     } catch (err: any) {
-      console.error("Upload error:", err);
-      setError("Failed to upload image. You can also paste an image URL directly.");
-    } finally {
+      console.error("Compression/Upload error:", err);
+      setError("Failed to process image. You can also paste an image URL directly.");
       setUploading(false);
     }
   };
@@ -155,12 +458,30 @@ export default function Admin() {
         <div className="bg-white p-10 rounded-2xl shadow-sm max-w-md w-full text-center">
           <h1 className="text-3xl font-serif text-brand-charcoal mb-4">Admin Access</h1>
           <p className="text-brand-charcoal/70 mb-8">Please sign in to manage your website content.</p>
+          
+          <div className="bg-amber-50 border border-amber-200 p-4 rounded-lg mb-8 text-left">
+            <p className="text-xs text-amber-800 leading-relaxed">
+              <strong>Note:</strong> If the login window doesn't appear, your browser might be blocking the popup. 
+              Try opening the website in a <strong>new tab</strong> or disabling your popup blocker.
+            </p>
+          </div>
+
           <button
             onClick={handleLogin}
-            className="bg-brand-charcoal text-white px-8 py-4 text-sm uppercase tracking-wider font-medium hover:bg-brand-wood transition-colors w-full flex items-center justify-center"
+            className="bg-brand-charcoal text-white px-8 py-4 text-sm uppercase tracking-wider font-medium hover:bg-brand-wood transition-colors w-full flex items-center justify-center mb-4"
           >
             Sign in with Google
           </button>
+          
+          <a 
+            href={window.location.href} 
+            target="_blank" 
+            rel="noopener noreferrer"
+            className="text-xs text-brand-wood underline hover:text-brand-charcoal transition-colors"
+          >
+            Open in New Tab
+          </a>
+
           {error && <p className="text-red-500 mt-4 text-sm">{error}</p>}
         </div>
       </div>
@@ -172,7 +493,10 @@ export default function Admin() {
       <div className="container mx-auto px-6 md:px-12 max-w-6xl">
         <div className="flex justify-between items-center mb-12">
           <div>
-            <h1 className="text-4xl font-serif text-brand-charcoal mb-2">Dashboard</h1>
+            <div className="flex items-center space-x-4 mb-2">
+              <h1 className="text-4xl font-serif text-brand-charcoal">Dashboard</h1>
+              <a href="/" className="text-xs uppercase tracking-widest text-brand-wood hover:text-brand-charcoal transition-colors border border-brand-wood/30 px-3 py-1 rounded">Back to Website</a>
+            </div>
             <p className="text-brand-charcoal/70">Manage your portfolio projects</p>
           </div>
           <button
@@ -183,13 +507,51 @@ export default function Admin() {
           </button>
         </div>
 
+        {/* Instructions Card */}
+        <div className="bg-brand-wood/10 border border-brand-wood/20 p-6 rounded-2xl mb-12">
+          <h3 className="text-brand-charcoal font-serif text-lg mb-3">Quick Guide</h3>
+          <ul className="text-sm text-brand-charcoal/80 space-y-2 list-disc pl-5">
+            <li>Select a tab below to manage different sections of your website.</li>
+            <li><strong>Portfolio:</strong> Add, edit, or delete your design projects.</li>
+            <li><strong>Page Content:</strong> Update titles and text on your Home, About, and other pages.</li>
+            <li>All changes you make here will instantly appear on the public website.</li>
+          </ul>
+        </div>
+
+        {/* Tabs */}
+        <div className="flex flex-wrap gap-2 mb-8 border-b border-brand-charcoal/10 pb-4">
+          {[
+            { id: 'portfolio', label: 'Portfolio', icon: Briefcase },
+            { id: 'home', label: 'Home Page', icon: LayoutIcon },
+            { id: 'about', label: 'About Us', icon: Info },
+            { id: 'services', label: 'Services', icon: Settings },
+            { id: 'process', label: 'Our Process', icon: Loader2 },
+            { id: 'contact', label: 'Contact Info', icon: MessageSquare },
+          ].map(tab => (
+            <button
+              key={tab.id}
+              onClick={() => { setActiveTab(tab.id); setIsEditing(false); }}
+              className={cn(
+                "flex items-center px-4 py-2 rounded-lg text-sm font-medium transition-colors",
+                activeTab === tab.id 
+                  ? "bg-brand-charcoal text-white" 
+                  : "bg-white text-brand-charcoal/60 hover:bg-brand-charcoal/5"
+              )}
+            >
+              <tab.icon size={16} className="mr-2" />
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
         {error && (
           <div className="bg-red-50 text-red-600 p-4 rounded-lg mb-8 border border-red-100">
             {error}
           </div>
         )}
 
-        {isEditing ? (
+        {activeTab !== 'portfolio' ? renderPageEditor() : (
+          isEditing ? (
           <div className="bg-white p-8 rounded-2xl shadow-sm mb-12">
             <h2 className="text-2xl font-serif text-brand-charcoal mb-6">
               {currentProject.id ? 'Edit Project' : 'Add New Project'}
@@ -254,9 +616,22 @@ export default function Admin() {
                       className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
                       disabled={uploading}
                     />
-                    <button type="button" className="w-full flex items-center justify-center bg-brand-charcoal/5 text-brand-charcoal p-2 rounded text-sm hover:bg-brand-charcoal/10 transition-colors">
-                      {uploading ? <Loader2 className="animate-spin mr-2" size={16} /> : <ImageIcon className="mr-2" size={16} />}
-                      Upload Image
+                    <button type="button" className="w-full flex items-center justify-center bg-brand-charcoal/5 text-brand-charcoal p-2 rounded text-sm hover:bg-brand-charcoal/10 transition-colors relative overflow-hidden">
+                      {uploading ? (
+                        <div className="flex items-center">
+                          <Loader2 className="animate-spin mr-2" size={16} />
+                          <span>{Math.round(uploadProgress)}%</span>
+                          <div 
+                            className="absolute bottom-0 left-0 h-1 bg-brand-wood transition-all duration-300" 
+                            style={{ width: `${uploadProgress}%` }}
+                          ></div>
+                        </div>
+                      ) : (
+                        <div className="flex items-center">
+                          <ImageIcon className="mr-2" size={16} />
+                          <span>Upload Image</span>
+                        </div>
+                      )}
                     </button>
                   </div>
                 </div>
@@ -295,9 +670,22 @@ export default function Admin() {
                           className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
                           disabled={uploading}
                         />
-                        <button type="button" className="w-full flex items-center justify-center bg-brand-charcoal/5 text-brand-charcoal p-2 rounded text-sm hover:bg-brand-charcoal/10 transition-colors">
-                          {uploading ? <Loader2 className="animate-spin mr-2" size={16} /> : <ImageIcon className="mr-2" size={16} />}
-                          Upload Before Image
+                        <button type="button" className="w-full flex items-center justify-center bg-brand-charcoal/5 text-brand-charcoal p-2 rounded text-sm hover:bg-brand-charcoal/10 transition-colors relative overflow-hidden">
+                          {uploading ? (
+                            <div className="flex items-center">
+                              <Loader2 className="animate-spin mr-2" size={16} />
+                              <span>{Math.round(uploadProgress)}%</span>
+                              <div 
+                                className="absolute bottom-0 left-0 h-1 bg-brand-wood transition-all duration-300" 
+                                style={{ width: `${uploadProgress}%` }}
+                              ></div>
+                            </div>
+                          ) : (
+                            <div className="flex items-center">
+                              <ImageIcon className="mr-2" size={16} />
+                              <span>Upload Before Image</span>
+                            </div>
+                          )}
                         </button>
                       </div>
                     </>
@@ -383,7 +771,7 @@ export default function Admin() {
               </div>
             )}
           </>
-        )}
+        ))}
       </div>
     </div>
   );

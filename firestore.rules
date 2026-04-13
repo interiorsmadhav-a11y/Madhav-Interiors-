@@ -86,9 +86,18 @@ service cloud.firestore {
              isValidEmail(data.email);
     }
 
+    function isValidContent(data) {
+      return data.data is map && data.updatedAt is timestamp;
+    }
+
     // ===============================================================
     // Rules
     // ===============================================================
+
+    match /content/{pageId} {
+      allow read: if true;
+      allow write: if isAdmin() && isValidContent(request.resource.data);
+    }
 
     match /projects/{projectId} {
       // Public read for portfolio

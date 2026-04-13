@@ -1,6 +1,21 @@
+import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
+import { getPageContent } from '@/services/contentService';
 
 export default function Services() {
+  const [content, setContent] = useState<any>(null);
+
+  useEffect(() => {
+    const fetchContent = async () => {
+      const data = await getPageContent('services');
+      if (data) setContent(data);
+    };
+    fetchContent();
+  }, []);
+
+  const title = content?.title || "Tailored solutions for every space.";
+  const description = content?.description || "From complete home transformations to bespoke furniture pieces, we offer a comprehensive range of interior design services to meet your specific needs.";
+
   const services = [
     {
       title: 'Full Home Interiors',
@@ -46,10 +61,10 @@ export default function Services() {
         <div className="max-w-3xl mx-auto text-center mb-24">
           <span className="text-brand-wood uppercase tracking-widest text-xs font-semibold mb-4 block">Our Services</span>
           <h1 className="text-4xl md:text-5xl lg:text-6xl font-serif text-brand-charcoal mb-8">
-            Tailored solutions for every space.
+            {title}
           </h1>
           <p className="text-lg text-brand-charcoal/70 leading-relaxed">
-            From complete home transformations to bespoke furniture pieces, we offer a comprehensive range of interior design services to meet your specific needs.
+            {description}
           </p>
         </div>
 

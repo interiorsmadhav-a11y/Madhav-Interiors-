@@ -102,6 +102,12 @@ export default function Layout() {
             >
               Get a Quote
             </Link>
+            <Link
+              to="/admin"
+              className="text-xs uppercase tracking-widest text-brand-charcoal/40 hover:text-brand-wood transition-colors mt-4"
+            >
+              Admin Login
+            </Link>
           </nav>
         </div>
       )}
@@ -184,6 +190,7 @@ export default function Layout() {
           <div className="border-t border-white/10 pt-8 flex flex-col md:flex-row justify-between items-center text-xs text-brand-taupe/60">
             <p>&copy; {new Date().getFullYear()} Madhav Interiors. All rights reserved.</p>
             <div className="flex space-x-4 mt-4 md:mt-0">
+              <Link to="/admin" className="hover:text-white transition-colors">Admin Login</Link>
               <a href="#" className="hover:text-white transition-colors">Privacy Policy</a>
               <a href="#" className="hover:text-white transition-colors">Terms of Service</a>
             </div>

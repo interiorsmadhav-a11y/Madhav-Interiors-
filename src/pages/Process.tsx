@@ -1,4 +1,20 @@
+import { useState, useEffect } from 'react';
+import { getPageContent } from '@/services/contentService';
+
 export default function Process() {
+  const [content, setContent] = useState<any>(null);
+
+  useEffect(() => {
+    const fetchContent = async () => {
+      const data = await getPageContent('process');
+      if (data) setContent(data);
+    };
+    fetchContent();
+  }, []);
+
+  const title = content?.title || "A seamless journey from concept to reality.";
+  const description = content?.description || "We follow a structured and transparent process to ensure that your interior design journey is stress-free and enjoyable.";
+
   const steps = [
     {
       num: '01',
@@ -43,10 +59,10 @@ export default function Process() {
         <div className="max-w-3xl mx-auto text-center mb-24">
           <span className="text-brand-wood uppercase tracking-widest text-xs font-semibold mb-4 block">How We Work</span>
           <h1 className="text-4xl md:text-5xl lg:text-6xl font-serif text-brand-charcoal mb-8">
-            A seamless journey from concept to reality.
+            {title}
           </h1>
           <p className="text-lg text-brand-charcoal/70 leading-relaxed">
-            We follow a structured and transparent process to ensure that your interior design journey is stress-free and enjoyable.
+            {description}
           </p>
         </div>
 

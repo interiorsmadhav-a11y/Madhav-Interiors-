@@ -59,6 +59,21 @@
         }
       },
       "required": ["role", "email"]
+    },
+    "PageContent": {
+      "title": "Page Content",
+      "description": "Dynamic content for various pages of the website.",
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "description": "The actual content data for the page."
+        },
+        "updatedAt": {
+          "type": "timestamp"
+        }
+      },
+      "required": ["data", "updatedAt"]
     }
   },
   "firestore": {
@@ -69,6 +84,10 @@
     "/users/{userId}": {
       "schema": { "$ref": "#/entities/User" },
       "description": "Stores user roles and profiles."
+    },
+    "/content/{pageId}": {
+      "schema": { "$ref": "#/entities/PageContent" },
+      "description": "Stores dynamic content for different pages (home, about, etc.)."
     }
   }
 }
