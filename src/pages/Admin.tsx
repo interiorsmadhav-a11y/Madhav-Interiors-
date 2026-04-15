@@ -30,17 +30,44 @@ export default function Admin() {
   const [error, setError] = useState('');
   const [activeTab, setActiveTab] = useState('portfolio');
   const [pageData, setPageData] = useState<any>(null);
+  const [storageStatus, setStorageStatus] = useState<'unknown' | 'working' | 'error'>('unknown');
+
+  const [isAdminUser, setIsAdminUser] = useState(false);
+
+  useEffect(() => {
+    const checkStorage = async () => {
+      if (!user) return;
+      try {
+        // Try to list a non-existent file to check permissions
+        const storageRef = ref(storage, 'test-connection-' + Date.now());
+        await getDownloadURL(storageRef).catch(err => {
+          if (err.code === 'storage/object-not-found') {
+            setStorageStatus('working');
+          } else if (err.code === 'storage/unauthorized') {
+            setStorageStatus('error');
+          }
+        });
+      } catch (e) {
+        setStorageStatus('error');
+      }
+    };
+    if (user) checkStorage();
+  }, [user]);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
       if (currentUser) {
+        // Check if user is admin
+        setIsAdminUser(currentUser.email === 'interiorsmadhav@gmail.com');
+        
         if (activeTab === 'portfolio') {
           fetchProjects();
         } else {
           fetchPageContent(activeTab);
         }
       } else {
+        setIsAdminUser(false);
         setLoading(false);
       }
     });
@@ -351,43 +378,67 @@ export default function Admin() {
     setUploadProgress(0);
     setError('');
     
+    console.log("Starting upload for:", file.name, "Size:", file.size);
+    
     try {
       // Image compression options
       const options = {
-        maxSizeMB: 1,
-        maxWidthOrHeight: 1920,
+        maxSizeMB: 0.8,
+        maxWidthOrHeight: 1600,
         useWebWorker: true
       };
       
-      const compressedFile = await imageCompression(file, options);
+      let fileToUpload = file;
+      try {
+        fileToUpload = await imageCompression(file, options);
+        console.log("Compression successful. New size:", fileToUpload.size);
+      } catch (compErr) {
+        console.warn("Compression failed, using original file:", compErr);
+      }
       
       const storageRef = ref(storage, `${isPageContent ? 'content' : 'portfolio'}/${Date.now()}_${file.name}`);
-      const uploadTask = uploadBytesResumable(storageRef, compressedFile);
+      const uploadTask = uploadBytesResumable(storageRef, fileToUpload);
 
       uploadTask.on('state_changed', 
         (snapshot) => {
           const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
           setUploadProgress(progress);
+          console.log("Upload progress:", progress.toFixed(2) + "%");
         }, 
         (err) => {
-          console.error("Upload error:", err);
-          setError("Failed to upload image.");
+          console.error("Upload error details:", err);
+          let msg = "Upload failed. ";
+          if (err.code === 'storage/unauthorized') {
+            msg += "Permission denied. Please check your Firebase Storage Rules.";
+          } else if (err.code === 'storage/canceled') {
+            msg += "Upload canceled.";
+          } else {
+            msg += err.message;
+          }
+          setError(msg);
           setUploading(false);
         }, 
         async () => {
-          const url = await getDownloadURL(uploadTask.snapshot.ref);
-          if (isPageContent) {
-            setPageData(prev => ({ ...prev, [field]: url }));
-          } else {
-            setCurrentProject(prev => ({ ...prev, [field]: url }));
+          try {
+            const url = await getDownloadURL(uploadTask.snapshot.ref);
+            console.log("File available at:", url);
+            if (isPageContent) {
+              setPageData(prev => ({ ...prev, [field]: url }));
+            } else {
+              setCurrentProject(prev => ({ ...prev, [field]: url }));
+            }
+          } catch (err: any) {
+            console.error("Error getting download URL:", err);
+            setError(`Failed to get image URL: ${err.message}`);
+          } finally {
+            setUploading(false);
+            setUploadProgress(0);
           }
-          setUploading(false);
-          setUploadProgress(0);
         }
       );
     } catch (err: any) {
-      console.error("Compression/Upload error:", err);
-      setError("Failed to process image. You can also paste an image URL directly.");
+      console.error("General upload error:", err);
+      setError(`Error: ${err.message}`);
       setUploading(false);
     }
   };
@@ -527,6 +578,8 @@ export default function Admin() {
             { id: 'services', label: 'Services', icon: Settings },
             { id: 'process', label: 'Our Process', icon: Loader2 },
             { id: 'contact', label: 'Contact Info', icon: MessageSquare },
+            { id: 'setup', label: 'Firebase Setup', icon: Settings },
+            { id: 'deploy', label: '🚀 Publish Website', icon: LayoutIcon },
           ].map(tab => (
             <button
               key={tab.id}
@@ -544,13 +597,141 @@ export default function Admin() {
           ))}
         </div>
 
+        {!isAdminUser && user && (
+          <div className="bg-amber-50 border border-amber-200 p-4 rounded-lg mb-8">
+            <p className="text-sm text-amber-800">
+              <strong>Warning:</strong> You are logged in as <strong>{user.email}</strong>, which is not the primary administrator email (interiorsmadhav@gmail.com). 
+              You may not have permission to save changes or upload images.
+            </p>
+          </div>
+        )}
+
         {error && (
           <div className="bg-red-50 text-red-600 p-4 rounded-lg mb-8 border border-red-100">
             {error}
           </div>
         )}
 
-        {activeTab !== 'portfolio' ? renderPageEditor() : (
+          {activeTab === 'setup' && (
+            <div className="bg-white p-8 rounded-2xl shadow-sm mb-12 space-y-8">
+              <div className="flex items-center justify-between mb-6">
+                <h2 className="text-2xl font-serif text-brand-charcoal uppercase tracking-wider">
+                  Firebase Setup Assistant
+                </h2>
+                <div className={cn(
+                  "px-3 py-1 rounded-full text-xs font-bold uppercase tracking-widest flex items-center",
+                  storageStatus === 'working' ? "bg-green-100 text-green-700" : 
+                  storageStatus === 'error' ? "bg-red-100 text-red-700" : "bg-gray-100 text-gray-700"
+                )}>
+                  <div className={cn("w-2 h-2 rounded-full mr-2", 
+                    storageStatus === 'working' ? "bg-green-500" : 
+                    storageStatus === 'error' ? "bg-red-500" : "bg-gray-400"
+                  )}></div>
+                  Storage Status: {storageStatus === 'working' ? "Ready" : storageStatus === 'error' ? "Action Required" : "Checking..."}
+                </div>
+              </div>
+
+              {storageStatus !== 'working' && (
+                <div className="bg-brand-wood/5 border border-brand-wood/20 p-6 rounded-xl space-y-4">
+                  <h3 className="text-brand-wood font-bold uppercase text-sm tracking-widest">How to fix the "0% Upload" error:</h3>
+                  <p className="text-sm text-brand-charcoal/80">
+                    Your Firebase Storage is currently locked. To fix this, you must paste these rules into your Firebase Console.
+                  </p>
+                  
+                  <div className="space-y-2">
+                    <p className="text-xs font-bold text-brand-charcoal">1. Open this link:</p>
+                    <a 
+                      href="https://console.firebase.google.com/project/_/storage/rules" 
+                      target="_blank" 
+                      className="inline-block bg-brand-wood text-white px-4 py-2 rounded text-sm font-bold hover:bg-brand-charcoal transition-colors"
+                    >
+                      Open Firebase Storage Rules
+                    </a>
+                  </div>
+
+                  <div className="space-y-2">
+                    <p className="text-xs font-bold text-brand-charcoal">2. Copy and Paste this code:</p>
+                    <textarea 
+                      readOnly 
+                      className="w-full h-48 font-mono text-xs p-4 bg-brand-charcoal text-white rounded-lg"
+                      value={`rules_version = '2';\nservice firebase.storage {\n  match /b/{bucket}/o {\n    match /{allPaths=**} {\n      allow read: if true;\n      allow write: if request.auth != null && \n                   request.auth.token.email == "${auth.currentUser?.email}";\n    }\n  }\n}`}
+                    />
+                  </div>
+
+                  <p className="text-xs text-brand-charcoal/60 italic">
+                    * Make sure to click the blue <strong>"Publish"</strong> button after pasting.
+                  </p>
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="p-4 border border-brand-charcoal/10 rounded-xl">
+                  <h4 className="font-bold text-sm mb-2">Why do I need to do this?</h4>
+                  <p className="text-xs text-brand-charcoal/70">Google requires the owner to manually approve storage permissions for security. Once you paste these rules, only YOU can upload photos, but everyone can see them.</p>
+                </div>
+                <div className="p-4 border border-brand-charcoal/10 rounded-xl">
+                  <h4 className="font-bold text-sm mb-2">Still don't see the Rules tab?</h4>
+                  <p className="text-xs text-brand-charcoal/70">If you see a "Get Started" button, click it first. Follow the prompts (Next, Done), and then the "Rules" tab will appear at the top.</p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'deploy' && (
+            <div className="bg-white p-8 rounded-2xl shadow-sm mb-12 space-y-8">
+              <h2 className="text-2xl font-serif text-brand-charcoal mb-6 uppercase tracking-wider">
+                Publishing to Madhavinteriors.com
+              </h2>
+              
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                <div className="lg:col-span-2 space-y-8">
+                  <section className="relative pl-8 border-l-2 border-brand-wood/20">
+                    <div className="absolute -left-[9px] top-0 w-4 h-4 rounded-full bg-brand-wood flex items-center justify-center text-[10px] text-white font-bold">1</div>
+                    <h3 className="text-lg font-medium text-brand-wood mb-2">Prepare Your Computer</h3>
+                    <p className="text-brand-charcoal/70 text-sm mb-4">You need <strong>Node.js</strong> installed to publish the site. Download it from <a href="https://nodejs.org" target="_blank" className="text-brand-wood underline">nodejs.org</a>.</p>
+                  </section>
+
+                  <section className="relative pl-8 border-l-2 border-brand-wood/20">
+                    <div className="absolute -left-[9px] top-0 w-4 h-4 rounded-full bg-brand-wood flex items-center justify-center text-[10px] text-white font-bold">2</div>
+                    <h3 className="text-lg font-medium text-brand-wood mb-2">Download & Initialize</h3>
+                    <p className="text-brand-charcoal/70 text-sm mb-4">Click the ⚙️ Settings icon in AI Studio and select <strong>"Download ZIP"</strong>. Unzip it, then open your Terminal/Command Prompt and run:</p>
+                    <div className="bg-brand-charcoal text-white p-4 rounded-lg font-mono text-xs space-y-2">
+                      <p className="text-brand-wood/50"># Go to your folder</p>
+                      <p>cd [drag-your-folder-here]</p>
+                      <p className="text-brand-wood/50"># Install tools</p>
+                      <p>npm install</p>
+                    </div>
+                  </section>
+
+                  <section className="relative pl-8 border-l-2 border-brand-wood/20">
+                    <div className="absolute -left-[9px] top-0 w-4 h-4 rounded-full bg-brand-wood flex items-center justify-center text-[10px] text-white font-bold">3</div>
+                    <h3 className="text-lg font-medium text-brand-wood mb-2">Deploy to Firebase</h3>
+                    <p className="text-brand-charcoal/70 text-sm mb-4">This command builds your site and pushes it to the web for free.</p>
+                    <div className="bg-brand-charcoal text-white p-4 rounded-lg font-mono text-xs space-y-2">
+                      <p className="text-brand-wood/50"># Log in once</p>
+                      <p>npx firebase login</p>
+                      <p className="text-brand-wood/50"># Build and Publish</p>
+                      <p>npm run build && npx firebase deploy</p>
+                    </div>
+                  </section>
+                </div>
+
+                <div className="bg-brand-wood/5 p-6 rounded-2xl h-fit border border-brand-wood/10">
+                  <h4 className="font-serif text-brand-wood mb-4 uppercase tracking-widest text-sm">Domain Setup</h4>
+                  <p className="text-xs text-brand-charcoal/70 mb-4">Once deployed, Firebase will give you a URL. To use <strong>madhavinteriors.com</strong>:</p>
+                  <ol className="text-xs text-brand-charcoal/80 space-y-3 list-decimal pl-4">
+                    <li>Go to Firebase Console &gt; Hosting</li>
+                    <li>Click "Add Custom Domain"</li>
+                    <li>Enter your domain</li>
+                    <li>Copy the <strong>A Records</strong> (IP addresses)</li>
+                    <li>Paste them into your <strong>GoDaddy</strong> DNS settings</li>
+                  </ol>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {activeTab !== 'portfolio' && activeTab !== 'deploy' && activeTab !== 'setup' ? renderPageEditor() : (
           isEditing ? (
           <div className="bg-white p-8 rounded-2xl shadow-sm mb-12">
             <h2 className="text-2xl font-serif text-brand-charcoal mb-6">
@@ -596,43 +777,68 @@ export default function Admin() {
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="border border-brand-charcoal/20 p-4 rounded">
-                  <label className="block text-sm font-medium text-brand-charcoal mb-2">Main Image (After)</label>
+                <div className="border-2 border-dashed border-brand-wood/30 p-6 rounded-xl bg-brand-wood/5">
+                  <label className="block text-sm font-bold text-brand-wood mb-3 uppercase tracking-widest">Project Image (Required)</label>
+                  
                   {currentProject.image && (
-                    <img src={currentProject.image} alt="Preview" className="w-full h-40 object-cover mb-4 rounded" />
+                    <img src={currentProject.image} alt="Preview" className="w-full h-48 object-cover mb-4 rounded-lg shadow-md" />
                   )}
-                  <input
-                    type="text"
-                    placeholder="Image URL"
-                    value={currentProject.image || ''}
-                    onChange={e => setCurrentProject({...currentProject, image: e.target.value})}
-                    className="w-full border border-brand-charcoal/20 p-2 rounded mb-2 text-sm"
-                  />
-                  <div className="relative">
-                    <input
-                      type="file"
-                      accept="image/*"
-                      onChange={e => handleImageUpload(e, 'image')}
-                      className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                      disabled={uploading}
-                    />
-                    <button type="button" className="w-full flex items-center justify-center bg-brand-charcoal/5 text-brand-charcoal p-2 rounded text-sm hover:bg-brand-charcoal/10 transition-colors relative overflow-hidden">
-                      {uploading ? (
-                        <div className="flex items-center">
-                          <Loader2 className="animate-spin mr-2" size={16} />
-                          <span>{Math.round(uploadProgress)}%</span>
-                          <div 
-                            className="absolute bottom-0 left-0 h-1 bg-brand-wood transition-all duration-300" 
-                            style={{ width: `${uploadProgress}%` }}
-                          ></div>
-                        </div>
-                      ) : (
-                        <div className="flex items-center">
-                          <ImageIcon className="mr-2" size={16} />
-                          <span>Upload Image</span>
-                        </div>
-                      )}
-                    </button>
+
+                  <div className="space-y-4">
+                    <div>
+                      <p className="text-xs text-brand-charcoal/60 mb-2 font-medium">Option A: Upload from computer</p>
+                      <div className="relative">
+                        <label className={cn(
+                          "w-full flex items-center justify-center bg-brand-wood text-white p-3 rounded text-sm hover:bg-brand-charcoal transition-colors cursor-pointer relative overflow-hidden shadow-sm",
+                          uploading && "opacity-50 cursor-not-allowed"
+                        )}>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            onChange={e => handleImageUpload(e, 'image')}
+                            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                            disabled={uploading}
+                          />
+                          {uploading ? (
+                            <div className="flex flex-col items-center w-full">
+                              <div className="flex items-center mb-1">
+                                <Loader2 className="animate-spin mr-2" size={16} />
+                                <span>{Math.round(uploadProgress)}%</span>
+                              </div>
+                              <div className="w-full bg-white/20 h-1 rounded-full overflow-hidden">
+                                <div 
+                                  className="h-full bg-white transition-all duration-300" 
+                                  style={{ width: `${uploadProgress}%` }}
+                                ></div>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="flex items-center">
+                              <ImageIcon className="mr-2" size={16} />
+                              <span className="font-bold">UPLOAD PHOTO</span>
+                            </div>
+                          )}
+                        </label>
+                      </div>
+                    </div>
+
+                    <div className="relative flex items-center py-2">
+                      <div className="flex-grow border-t border-brand-charcoal/10"></div>
+                      <span className="flex-shrink mx-4 text-xs text-brand-charcoal/40 uppercase font-bold">OR</span>
+                      <div className="flex-grow border-t border-brand-charcoal/10"></div>
+                    </div>
+
+                    <div>
+                      <p className="text-xs text-brand-charcoal/60 mb-2 font-medium">Option B: Paste a link (Recommended if upload is stuck)</p>
+                      <input
+                        type="text"
+                        placeholder="https://example.com/photo.jpg"
+                        value={currentProject.image || ''}
+                        onChange={e => setCurrentProject({...currentProject, image: e.target.value})}
+                        className="w-full border border-brand-charcoal/20 p-3 rounded focus:outline-none focus:border-brand-wood text-sm bg-white"
+                      />
+                      <p className="text-[10px] text-brand-charcoal/40 mt-1 italic">Use PostImages.org to get a direct link.</p>
+                    </div>
                   </div>
                 </div>
 
@@ -663,14 +869,17 @@ export default function Admin() {
                         className="w-full border border-brand-charcoal/20 p-2 rounded mb-2 text-sm"
                       />
                       <div className="relative">
-                        <input
-                          type="file"
-                          accept="image/*"
-                          onChange={e => handleImageUpload(e, 'beforeImg')}
-                          className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                          disabled={uploading}
-                        />
-                        <button type="button" className="w-full flex items-center justify-center bg-brand-charcoal/5 text-brand-charcoal p-2 rounded text-sm hover:bg-brand-charcoal/10 transition-colors relative overflow-hidden">
+                        <label className={cn(
+                          "w-full flex items-center justify-center bg-brand-charcoal/5 text-brand-charcoal p-2 rounded text-sm hover:bg-brand-charcoal/10 transition-colors cursor-pointer relative overflow-hidden",
+                          uploading && "opacity-50 cursor-not-allowed"
+                        )}>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            onChange={e => handleImageUpload(e, 'beforeImg')}
+                            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                            disabled={uploading}
+                          />
                           {uploading ? (
                             <div className="flex items-center">
                               <Loader2 className="animate-spin mr-2" size={16} />
@@ -686,7 +895,7 @@ export default function Admin() {
                               <span>Upload Before Image</span>
                             </div>
                           )}
-                        </button>
+                        </label>
                       </div>
                     </>
                   )}
