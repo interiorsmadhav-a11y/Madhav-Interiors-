@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react';
 import { cn } from '@/lib/utils';
 import BeforeAfterSlider from '@/components/BeforeAfterSlider';
-import { collection, getDocs, query, orderBy } from 'firebase/firestore';
+import { collection, onSnapshot, query, orderBy } from 'firebase/firestore';
 import { db } from '@/firebase';
-import { Loader2 } from 'lucide-react';
+import { Loader2, AlertCircle } from 'lucide-react';
 
 interface Project {
   id: string;
@@ -15,12 +15,14 @@ interface Project {
   beforeImg?: string;
   image?: string;
   img?: string; // fallback for hardcoded
+  createdAt?: any;
 }
 
 export default function Portfolio() {
   const [filter, setFilter] = useState('All');
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const categories = ['All', 'Living Room', 'Bedroom', 'Kitchen', 'Commercial', 'Residential'];
 
@@ -78,27 +80,25 @@ export default function Portfolio() {
   ];
 
   useEffect(() => {
-    const fetchProjects = async () => {
-      try {
-        const q = query(collection(db, 'projects'), orderBy('createdAt', 'desc'));
-        const querySnapshot = await getDocs(q);
-        const fetchedProjects = querySnapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
-        })) as Project[];
-        
-        // Combine fetched projects with hardcoded ones
-        setProjects([...fetchedProjects, ...hardcodedProjects]);
-      } catch (error) {
-        console.error("Error fetching projects:", error);
-        // Fallback to hardcoded if error
-        setProjects(hardcodedProjects);
-      } finally {
-        setLoading(false);
-      }
-    };
+    const q = query(collection(db, 'projects'), orderBy('createdAt', 'desc'));
+    
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const fetchedProjects = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      })) as Project[];
+      
+      setProjects([...fetchedProjects, ...hardcodedProjects]);
+      setLoading(false);
+      setError(null);
+    }, (err) => {
+      console.error("Error fetching projects:", err);
+      setError("Unable to load latest projects. Showing gallery highlights.");
+      setProjects(hardcodedProjects);
+      setLoading(false);
+    });
 
-    fetchProjects();
+    return () => unsubscribe();
   }, []);
 
   const filteredProjects = filter === 'All' ? projects : projects.filter(p => p.category === filter);
@@ -117,7 +117,7 @@ export default function Portfolio() {
         </div>
 
         {/* Filters */}
-        <div className="flex flex-wrap justify-center gap-4 mb-16">
+        <div className="flex flex-wrap justify-center gap-4 mb-8">
           {categories.map(cat => (
             <button
               key={cat}
@@ -133,6 +133,13 @@ export default function Portfolio() {
             </button>
           ))}
         </div>
+
+        {error && (
+          <div className="flex items-center justify-center gap-2 text-brand-wood mb-12 bg-brand-wood/5 p-4 rounded-lg max-w-xl mx-auto">
+            <AlertCircle size={18} />
+            <p className="text-sm font-medium">{error}</p>
+          </div>
+        )}
 
         {/* Grid */}
         {loading ? (

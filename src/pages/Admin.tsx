@@ -1,11 +1,19 @@
 import React, { useState, useEffect } from 'react';
-import { auth, db, storage, googleProvider } from '@/firebase';
+import { auth, db, googleProvider } from '@/firebase';
 import { signInWithPopup, signOut, onAuthStateChanged, User } from 'firebase/auth';
 import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, serverTimestamp, query, orderBy, getDoc, setDoc } from 'firebase/firestore';
-import { ref, uploadBytesResumable, getDownloadURL, deleteObject } from 'firebase/storage';
 import { Trash2, Edit2, Plus, LogOut, Image as ImageIcon, Loader2, Layout as LayoutIcon, Briefcase, Info, MessageSquare, Settings } from 'lucide-react';
 import imageCompression from 'browser-image-compression';
 import { cn } from '@/lib/utils';
+
+const fileToBase64 = (file: File): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = error => reject(error);
+  });
+};
 
 interface Project {
   id: string;
@@ -19,6 +27,48 @@ interface Project {
   authorUID: string;
 }
 
+interface FirestoreErrorInfo {
+  error: string;
+  operationType: string;
+  path: string | null;
+  authInfo: {
+    userId: string | undefined;
+    email: string | null | undefined;
+    emailVerified: boolean | undefined;
+    isAnonymous: boolean | undefined;
+    tenantId: string | null | undefined;
+    providerInfo: {
+      providerId: string;
+      displayName: string | null;
+      email: string | null;
+      photoUrl: string | null;
+    }[];
+  }
+}
+
+const handleFirestoreError = (error: unknown, operationType: string, path: string | null) => {
+  const errInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: {
+      userId: auth.currentUser?.uid,
+      email: auth.currentUser?.email,
+      emailVerified: auth.currentUser?.emailVerified,
+      isAnonymous: auth.currentUser?.isAnonymous,
+      tenantId: auth.currentUser?.tenantId,
+      providerInfo: auth.currentUser?.providerData.map(provider => ({
+        providerId: provider.providerId,
+        displayName: provider.displayName,
+        email: provider.email,
+        photoUrl: provider.photoURL
+      })) || []
+    },
+    operationType,
+    path
+  };
+  console.error('Firestore Error: ', JSON.stringify(errInfo));
+  return new Error(JSON.stringify(errInfo));
+};
+
 export default function Admin() {
   const [user, setUser] = useState<User | null>(null);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -30,29 +80,8 @@ export default function Admin() {
   const [error, setError] = useState('');
   const [activeTab, setActiveTab] = useState('portfolio');
   const [pageData, setPageData] = useState<any>(null);
-  const [storageStatus, setStorageStatus] = useState<'unknown' | 'working' | 'error'>('unknown');
 
   const [isAdminUser, setIsAdminUser] = useState(false);
-
-  useEffect(() => {
-    const checkStorage = async () => {
-      if (!user) return;
-      try {
-        // Try to list a non-existent file to check permissions
-        const storageRef = ref(storage, 'test-connection-' + Date.now());
-        await getDownloadURL(storageRef).catch(err => {
-          if (err.code === 'storage/object-not-found') {
-            setStorageStatus('working');
-          } else if (err.code === 'storage/unauthorized') {
-            setStorageStatus('error');
-          }
-        });
-      } catch (e) {
-        setStorageStatus('error');
-      }
-    };
-    if (user) checkStorage();
-  }, [user]);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
@@ -106,8 +135,8 @@ export default function Admin() {
       });
       alert("Page content saved successfully!");
     } catch (err: any) {
-      console.error("Error saving page content:", err);
-      setError(err.message);
+      const detailedError = handleFirestoreError(err, 'write', `content/${activeTab}`);
+      setError(detailedError.message);
     } finally {
       setLoading(false);
     }
@@ -378,68 +407,36 @@ export default function Admin() {
     setUploadProgress(0);
     setError('');
     
-    console.log("Starting upload for:", file.name, "Size:", file.size);
+    console.log("Processing image for database storage:", file.name);
     
     try {
-      // Image compression options
+      // Compress heavily to stay under 1MB for Firestore (100% Free)
       const options = {
-        maxSizeMB: 0.8,
-        maxWidthOrHeight: 1600,
+        maxSizeMB: 0.5, 
+        maxWidthOrHeight: 1280,
         useWebWorker: true
       };
       
-      let fileToUpload = file;
-      try {
-        fileToUpload = await imageCompression(file, options);
-        console.log("Compression successful. New size:", fileToUpload.size);
-      } catch (compErr) {
-        console.warn("Compression failed, using original file:", compErr);
+      setUploadProgress(20);
+      const compressedFile = await imageCompression(file, options);
+      setUploadProgress(60);
+      
+      const base64 = await fileToBase64(compressedFile);
+      setUploadProgress(100);
+      
+      if (isPageContent) {
+        setPageData(prev => ({ ...prev, [field]: base64 }));
+      } else {
+        setCurrentProject(prev => ({ ...prev, [field]: base64 }));
       }
       
-      const storageRef = ref(storage, `${isPageContent ? 'content' : 'portfolio'}/${Date.now()}_${file.name}`);
-      const uploadTask = uploadBytesResumable(storageRef, fileToUpload);
-
-      uploadTask.on('state_changed', 
-        (snapshot) => {
-          const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
-          setUploadProgress(progress);
-          console.log("Upload progress:", progress.toFixed(2) + "%");
-        }, 
-        (err) => {
-          console.error("Upload error details:", err);
-          let msg = "Upload failed. ";
-          if (err.code === 'storage/unauthorized') {
-            msg += "Permission denied. Please check your Firebase Storage Rules.";
-          } else if (err.code === 'storage/canceled') {
-            msg += "Upload canceled.";
-          } else {
-            msg += err.message;
-          }
-          setError(msg);
-          setUploading(false);
-        }, 
-        async () => {
-          try {
-            const url = await getDownloadURL(uploadTask.snapshot.ref);
-            console.log("File available at:", url);
-            if (isPageContent) {
-              setPageData(prev => ({ ...prev, [field]: url }));
-            } else {
-              setCurrentProject(prev => ({ ...prev, [field]: url }));
-            }
-          } catch (err: any) {
-            console.error("Error getting download URL:", err);
-            setError(`Failed to get image URL: ${err.message}`);
-          } finally {
-            setUploading(false);
-            setUploadProgress(0);
-          }
-        }
-      );
+      console.log("Image processed successfully as Base64");
     } catch (err: any) {
-      console.error("General upload error:", err);
-      setError(`Error: ${err.message}`);
+      console.error("Image processing error:", err);
+      setError(`Failed to process image: ${err.message}`);
+    } finally {
       setUploading(false);
+      setTimeout(() => setUploadProgress(0), 1000);
     }
   };
 
@@ -478,9 +475,10 @@ export default function Admin() {
       setIsEditing(false);
       setCurrentProject({});
       await fetchProjects();
+      alert("Project saved successfully!");
     } catch (err: any) {
-      console.error("Error saving project:", err);
-      setError(err.message);
+      const detailedError = handleFirestoreError(err, currentProject.id ? 'update' : 'create', 'projects');
+      setError(detailedError.message);
     } finally {
       setLoading(false);
     }
@@ -546,9 +544,16 @@ export default function Admin() {
           <div>
             <div className="flex items-center space-x-4 mb-2">
               <h1 className="text-4xl font-serif text-brand-charcoal">Dashboard</h1>
-              <a href="/" className="text-xs uppercase tracking-widest text-brand-wood hover:text-brand-charcoal transition-colors border border-brand-wood/30 px-3 py-1 rounded">Back to Website</a>
+              <a 
+                href="/portfolio" 
+                target="_blank" 
+                className="text-xs uppercase tracking-widest bg-brand-wood text-white px-4 py-1 rounded hover:bg-brand-charcoal transition-colors flex items-center gap-2"
+              >
+                <LayoutIcon size={12} />
+                View Live Website
+              </a>
             </div>
-            <p className="text-brand-charcoal/70">Manage your portfolio projects</p>
+            <p className="text-brand-charcoal/70">Manage your portfolio and page content</p>
           </div>
           <button
             onClick={handleLogout}
@@ -578,7 +583,6 @@ export default function Admin() {
             { id: 'services', label: 'Services', icon: Settings },
             { id: 'process', label: 'Our Process', icon: Loader2 },
             { id: 'contact', label: 'Contact Info', icon: MessageSquare },
-            { id: 'setup', label: 'Firebase Setup', icon: Settings },
             { id: 'deploy', label: '🚀 Publish Website', icon: LayoutIcon },
           ].map(tab => (
             <button
@@ -612,126 +616,7 @@ export default function Admin() {
           </div>
         )}
 
-          {activeTab === 'setup' && (
-            <div className="bg-white p-8 rounded-2xl shadow-sm mb-12 space-y-8">
-              <div className="flex items-center justify-between mb-6">
-                <h2 className="text-2xl font-serif text-brand-charcoal uppercase tracking-wider">
-                  Firebase Setup Assistant
-                </h2>
-                <div className={cn(
-                  "px-3 py-1 rounded-full text-xs font-bold uppercase tracking-widest flex items-center",
-                  storageStatus === 'working' ? "bg-green-100 text-green-700" : 
-                  storageStatus === 'error' ? "bg-red-100 text-red-700" : "bg-gray-100 text-gray-700"
-                )}>
-                  <div className={cn("w-2 h-2 rounded-full mr-2", 
-                    storageStatus === 'working' ? "bg-green-500" : 
-                    storageStatus === 'error' ? "bg-red-500" : "bg-gray-400"
-                  )}></div>
-                  Storage Status: {storageStatus === 'working' ? "Ready" : storageStatus === 'error' ? "Action Required" : "Checking..."}
-                </div>
-              </div>
-
-              {storageStatus !== 'working' && (
-                <div className="bg-brand-wood/5 border border-brand-wood/20 p-6 rounded-xl space-y-4">
-                  <h3 className="text-brand-wood font-bold uppercase text-sm tracking-widest">How to fix the "0% Upload" error:</h3>
-                  <p className="text-sm text-brand-charcoal/80">
-                    Your Firebase Storage is currently locked. To fix this, you must paste these rules into your Firebase Console.
-                  </p>
-                  
-                  <div className="space-y-2">
-                    <p className="text-xs font-bold text-brand-charcoal">1. Open this link:</p>
-                    <a 
-                      href="https://console.firebase.google.com/project/_/storage/rules" 
-                      target="_blank" 
-                      className="inline-block bg-brand-wood text-white px-4 py-2 rounded text-sm font-bold hover:bg-brand-charcoal transition-colors"
-                    >
-                      Open Firebase Storage Rules
-                    </a>
-                  </div>
-
-                  <div className="space-y-2">
-                    <p className="text-xs font-bold text-brand-charcoal">2. Copy and Paste this code:</p>
-                    <textarea 
-                      readOnly 
-                      className="w-full h-48 font-mono text-xs p-4 bg-brand-charcoal text-white rounded-lg"
-                      value={`rules_version = '2';\nservice firebase.storage {\n  match /b/{bucket}/o {\n    match /{allPaths=**} {\n      allow read: if true;\n      allow write: if request.auth != null && \n                   request.auth.token.email == "${auth.currentUser?.email}";\n    }\n  }\n}`}
-                    />
-                  </div>
-
-                  <p className="text-xs text-brand-charcoal/60 italic">
-                    * Make sure to click the blue <strong>"Publish"</strong> button after pasting.
-                  </p>
-                </div>
-              )}
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="p-4 border border-brand-charcoal/10 rounded-xl">
-                  <h4 className="font-bold text-sm mb-2">Why do I need to do this?</h4>
-                  <p className="text-xs text-brand-charcoal/70">Google requires the owner to manually approve storage permissions for security. Once you paste these rules, only YOU can upload photos, but everyone can see them.</p>
-                </div>
-                <div className="p-4 border border-brand-charcoal/10 rounded-xl">
-                  <h4 className="font-bold text-sm mb-2">Still don't see the Rules tab?</h4>
-                  <p className="text-xs text-brand-charcoal/70">If you see a "Get Started" button, click it first. Follow the prompts (Next, Done), and then the "Rules" tab will appear at the top.</p>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {activeTab === 'deploy' && (
-            <div className="bg-white p-8 rounded-2xl shadow-sm mb-12 space-y-8">
-              <h2 className="text-2xl font-serif text-brand-charcoal mb-6 uppercase tracking-wider">
-                Publishing to Madhavinteriors.com
-              </h2>
-              
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                <div className="lg:col-span-2 space-y-8">
-                  <section className="relative pl-8 border-l-2 border-brand-wood/20">
-                    <div className="absolute -left-[9px] top-0 w-4 h-4 rounded-full bg-brand-wood flex items-center justify-center text-[10px] text-white font-bold">1</div>
-                    <h3 className="text-lg font-medium text-brand-wood mb-2">Prepare Your Computer</h3>
-                    <p className="text-brand-charcoal/70 text-sm mb-4">You need <strong>Node.js</strong> installed to publish the site. Download it from <a href="https://nodejs.org" target="_blank" className="text-brand-wood underline">nodejs.org</a>.</p>
-                  </section>
-
-                  <section className="relative pl-8 border-l-2 border-brand-wood/20">
-                    <div className="absolute -left-[9px] top-0 w-4 h-4 rounded-full bg-brand-wood flex items-center justify-center text-[10px] text-white font-bold">2</div>
-                    <h3 className="text-lg font-medium text-brand-wood mb-2">Download & Initialize</h3>
-                    <p className="text-brand-charcoal/70 text-sm mb-4">Click the ⚙️ Settings icon in AI Studio and select <strong>"Download ZIP"</strong>. Unzip it, then open your Terminal/Command Prompt and run:</p>
-                    <div className="bg-brand-charcoal text-white p-4 rounded-lg font-mono text-xs space-y-2">
-                      <p className="text-brand-wood/50"># Go to your folder</p>
-                      <p>cd [drag-your-folder-here]</p>
-                      <p className="text-brand-wood/50"># Install tools</p>
-                      <p>npm install</p>
-                    </div>
-                  </section>
-
-                  <section className="relative pl-8 border-l-2 border-brand-wood/20">
-                    <div className="absolute -left-[9px] top-0 w-4 h-4 rounded-full bg-brand-wood flex items-center justify-center text-[10px] text-white font-bold">3</div>
-                    <h3 className="text-lg font-medium text-brand-wood mb-2">Deploy to Firebase</h3>
-                    <p className="text-brand-charcoal/70 text-sm mb-4">This command builds your site and pushes it to the web for free.</p>
-                    <div className="bg-brand-charcoal text-white p-4 rounded-lg font-mono text-xs space-y-2">
-                      <p className="text-brand-wood/50"># Log in once</p>
-                      <p>npx firebase login</p>
-                      <p className="text-brand-wood/50"># Build and Publish</p>
-                      <p>npm run build && npx firebase deploy</p>
-                    </div>
-                  </section>
-                </div>
-
-                <div className="bg-brand-wood/5 p-6 rounded-2xl h-fit border border-brand-wood/10">
-                  <h4 className="font-serif text-brand-wood mb-4 uppercase tracking-widest text-sm">Domain Setup</h4>
-                  <p className="text-xs text-brand-charcoal/70 mb-4">Once deployed, Firebase will give you a URL. To use <strong>madhavinteriors.com</strong>:</p>
-                  <ol className="text-xs text-brand-charcoal/80 space-y-3 list-decimal pl-4">
-                    <li>Go to Firebase Console &gt; Hosting</li>
-                    <li>Click "Add Custom Domain"</li>
-                    <li>Enter your domain</li>
-                    <li>Copy the <strong>A Records</strong> (IP addresses)</li>
-                    <li>Paste them into your <strong>GoDaddy</strong> DNS settings</li>
-                  </ol>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {activeTab !== 'portfolio' && activeTab !== 'deploy' && activeTab !== 'setup' ? renderPageEditor() : (
+          {activeTab !== 'portfolio' && activeTab !== 'deploy' ? renderPageEditor() : (
           isEditing ? (
           <div className="bg-white p-8 rounded-2xl shadow-sm mb-12">
             <h2 className="text-2xl font-serif text-brand-charcoal mb-6">
@@ -758,9 +643,11 @@ export default function Admin() {
                     className="w-full border border-brand-charcoal/20 p-3 rounded focus:outline-none focus:border-brand-wood"
                   >
                     <option value="">Select Category</option>
-                    <option value="Residential">Residential</option>
-                    <option value="Commercial">Commercial</option>
+                    <option value="Living Room">Living Room</option>
+                    <option value="Bedroom">Bedroom</option>
                     <option value="Kitchen">Kitchen</option>
+                    <option value="Commercial">Commercial</option>
+                    <option value="Residential">Residential</option>
                   </select>
                 </div>
               </div>
